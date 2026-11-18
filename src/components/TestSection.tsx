@@ -1,7 +1,7 @@
-import { useMemo, type ReactNode } from 'react'
-import { ArrowHelper, CanvasTexture, Vector3 } from 'three'
+import { useEffect, useMemo, type ReactNode } from 'react'
+import { ArrowHelper, CanvasTexture, DoubleSide, Vector3 } from 'three'
 import { Edges, Grid } from '@react-three/drei'
-import { SECTION, TURNTABLE_RADIUS } from '../lib/tunnel'
+import { SECTION, TURNTABLE_RADIUS, TURNTABLE_TOP } from '../lib/tunnel'
 
 const { L, W, H } = SECTION
 const CONE = 2.5
@@ -25,6 +25,8 @@ export function TestSection({ yaw, children }: Props) {
     g.fillText('WIND  +X', 128, 32)
     return new CanvasTexture(c)
   }, [])
+  useEffect(() => () => arrow.dispose(), [arrow])
+  useEffect(() => () => label.dispose(), [label])
   const coneR = (W / 2) * Math.SQRT2
 
   return (
@@ -56,7 +58,7 @@ export function TestSection({ yaw, children }: Props) {
       <group position={[-L / 2 - CONE / 2, H / 2, 0]} rotation={[0, 0, Math.PI / 2]} scale={[H / W, 1, 1]}>
         <mesh rotation={[0, Math.PI / 4, 0]}>
           <cylinderGeometry args={[coneR * 1.6, coneR, CONE, 4, 1, true]} />
-          <meshBasicMaterial color="#7fb2d6" transparent opacity={0.025} depthWrite={false} side={2} />
+          <meshBasicMaterial color="#7fb2d6" transparent opacity={0.025} depthWrite={false} side={DoubleSide} />
           <Edges threshold={15} color="#2f4a5f" />
         </mesh>
       </group>
@@ -75,7 +77,7 @@ export function TestSection({ yaw, children }: Props) {
           <ringGeometry args={[TURNTABLE_RADIUS - 0.06, TURNTABLE_RADIUS - 0.03, 64]} />
           <meshBasicMaterial color="#4f7896" />
         </mesh>
-        <group position={[0, 0.08, 0]}>{children}</group>
+        <group position={[0, TURNTABLE_TOP, 0]}>{children}</group>
       </group>
 
       {/* wind direction */}

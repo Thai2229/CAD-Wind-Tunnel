@@ -10,7 +10,7 @@ const MAX_STEPS = 400
 function direction(p: Vec3, o: Obstacle): { dir: Vec3; ratio: number } | null {
   const v = velocityAt(p, o, 1)
   const s = Math.hypot(...v)
-  if (s < 1e-4) return null
+  if (!Number.isFinite(s) || s < 1e-4) return null
   return { dir: [v[0] / s, v[1] / s, v[2] / s], ratio: s }
 }
 
@@ -28,7 +28,7 @@ function buildGeometry(o: Obstacle): BufferGeometry {
         const b = direction(mid, o)
         if (!b) break
         const next: Vec3 = [p[0] + b.dir[0] * STEP, p[1] + b.dir[1] * STEP, p[2] + b.dir[2] * STEP]
-        if (next[1] < 0.02 || next[1] > H - 0.02) break
+        if (!next.every(Number.isFinite) || next[1] < 0.02 || next[1] > H - 0.02) break
         // tint by local speed: slow = cool blue, fast = warm white
         const t = Math.min(1, Math.max(0, (b.ratio - 0.5) / 1))
         pos.push(...p, ...next)

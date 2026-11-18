@@ -170,3 +170,55 @@ describe('surfacePressureCoefficient', () => {
     expect(surfacePressureCoefficient([0, 0, 0], wind)).toBe(0)
   })
 })
+
+describe('velocityAt (degenerate flat plate)', () => {
+  const plates: Obstacle[] = [
+    { center: [0, 0, 0], halfExtents: [1, 0, 1] },
+    { center: [0, 0, 0], halfExtents: [0, 1, 1] },
+    { center: [1, 2, 3], halfExtents: [1, 1, 0] },
+  ]
+  const points: Vec3[] = [
+    [0, 0, 0],
+    [1, 2, 3],
+    [-2, 0, 0],
+    [0, 0.5, 0],
+    [0.5, 0, 0.5],
+    [3, 2, 3],
+    [-5, 1, 2],
+    [2, 0, 0],
+  ]
+
+  it.each(plates.map((p, i) => [i, p] as const))('is finite everywhere for plate %i', (_i, plate) => {
+    for (const p of points) {
+      const v = velocityAt(p, plate, U)
+      expect(v.every((c) => Number.isFinite(c))).toBe(true)
+    }
+  })
+
+  it.each(plates.map((p, i) => [i, p] as const))('far field is about the freestream for plate %i', (_i, plate) => {
+    const far: Vec3 = [plate.center[0] + 1000, plate.center[1] + 50, plate.center[2] - 50]
+    const v = velocityAt(far, plate, U)
+    expect(Math.abs(v[0] - U)).toBeLessThan(1e-2 * U)
+    expect(Math.hypot(v[1], v[2])).toBeLessThan(1e-1 * U)
+  })
+})
+
+describe('velocityAt out parameter', () => {
+  it('writes into out and returns the same instance', () => {
+    const out: Vec3 = [0, 0, 0]
+    const r = velocityAt([-3, 2.5, 1], sphere, U, out)
+    expect(r).toBe(out)
+  })
+  it('gives the same values as the call without out', () => {
+    const p: Vec3 = [-3, 2.5, 1]
+    const out: Vec3 = [9, 9, 9]
+    velocityAt(p, sphere, U, out)
+    expect(out).toEqual(velocityAt(p, sphere, U))
+  })
+  it('overwrites out with zeros inside the obstacle', () => {
+    const out: Vec3 = [9, 9, 9]
+    const r = velocityAt([0, 0, 0], sphere, U, out)
+    expect(r).toBe(out)
+    expect(out).toEqual([0, 0, 0])
+  })
+})

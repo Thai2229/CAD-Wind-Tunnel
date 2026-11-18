@@ -1,17 +1,24 @@
 import {
   Box3,
+  LoadingManager,
+  Matrix4,
   Float32BufferAttribute,
   Mesh,
   Vector3,
   type BufferGeometry,
+  type Material,
   type Object3D,
+  type Texture,
 } from 'three'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import type { Vec3 } from './flowField'
+import type { LengthUnit } from './aero'
 import { SECTION } from './tunnel'
+
+const IDENTITY = new Matrix4()
 
 export type LoadedModel = {
   name: string
@@ -22,16 +29,75 @@ export type LoadedModel = {
   displaySize: Vec3
 }
 
-function meshesOf(root: Object3D): BufferGeometry[] {
-  const out: BufferGeometry[] = []
-  root.updateMatrixWorld(true)
-  root.traverse((o) => {
-    if (o instanceof Mesh) {
-      const g = (o.geometry as BufferGeometry).clone()
-      g.applyMatrix4(o.matrixWorld)
-      out.push(g)
+export const MAX_VERTICES = 3_000_000
+export const MAX_MESHES = 500
+
+// Friendly, user-facing errors; everything else gets a generic "could not read" message.
+class ModelError extends Error {}
+
+// Only inline resources are allowed: a model must never trigger a network request.
+export function sanitizeResourceUrl(url: string): string {
+  const u = url.toLowerCase()
+  if (u.startsWith('data:') || u.startsWith('blob:')) return url
+  return ''
+}
+
+export function assertModelBudget(vertexCounts: number[]): void {
+  let total = 0
+  for (const n of vertexCounts) total += n
+  if (total > MAX_VERTICES || vertexCounts.length > MAX_MESHES) {
+    throw new ModelError('This model is too complex for the browser (limit: 3 million vertices, 500 meshes). Simplify or decimate it and try again.')
+  }
+}
+
+const SUGGESTED_UNIT: Record<string, LengthUnit> = { '.glb': 'm' }
+
+export function suggestedUnit(extension: string): LengthUnit {
+  return SUGGESTED_UNIT[extension] || 'mm'
+}
+
+function toFloat32(g: BufferGeometry) {
+  for (const name of ['position', 'normal']) {
+    const a = g.getAttribute(name)
+    if (a && !(a.array instanceof Float32Array)) {
+      const f = new Float32Array(a.count * 3)
+      for (let i = 0; i < a.count; i++) {
+        f[i * 3] = a.getX(i)
+        f[i * 3 + 1] = a.getY(i)
+        f[i * 3 + 2] = a.getZ(i)
+      }
+      g.setAttribute(name, new Float32BufferAttribute(f, 3))
     }
+  }
+}
+
+function disposeMaterial(m: Material) {
+  for (const v of Object.values(m)) {
+    if (v && (v as Texture).isTexture) (v as Texture).dispose()
+  }
+  m.dispose()
+}
+
+// Bakes every mesh's world transform into a geometry, then frees the source scene.
+function meshesOf(root: Object3D): BufferGeometry[] {
+  const meshes: Mesh[] = []
+  root.traverse((o) => {
+    if (o instanceof Mesh) meshes.push(o)
   })
+  assertModelBudget(meshes.map((m) => m.geometry.getAttribute('position')?.count || 0))
+  root.updateMatrixWorld(true)
+  const out: BufferGeometry[] = []
+  for (const m of meshes) {
+    const identity = m.matrixWorld.equals(IDENTITY)
+    let g = m.geometry as BufferGeometry
+    if (!identity) g = g.clone()
+    toFloat32(g)
+    if (!identity) g.applyMatrix4(m.matrixWorld)
+    out.push(g)
+    // geometries we clone (or no longer reference) are released; reused ones now belong to the model
+    if (!identity) m.geometry.dispose()
+    for (const mat of [m.material].flat()) disposeMaterial(mat)
+  }
   return out
 }
 
@@ -42,14 +108,25 @@ async function parse(file: File, extension: string): Promise<BufferGeometry[]> {
   const buffer = await file.arrayBuffer()
   if (extension === '.stl') {
     const g = new STLLoader().parse(buffer)
+    assertModelBudget([g.getAttribute('position').count])
     g.rotateX(-Math.PI / 2) // CAD STL is Z-up, the scene is Y-up
     g.deleteAttribute('normal') // file normals are often zeroed; recompute per face
     return [g]
   }
   if (extension === '.ply') {
-    return [new PLYLoader().parse(buffer)]
+    const g = new PLYLoader().parse(buffer)
+    const count = g.getAttribute('position')?.count || 0
+    assertModelBudget([count])
+    const index = g.getIndex()
+    if (count === 0 || (!index && count % 3 !== 0) || (index && index.count < 3)) {
+      throw new ModelError(`"${file.name}" has no faces. Point clouds are not supported; use a meshed PLY.`)
+    }
+    g.rotateX(-Math.PI / 2) // treated as Z-up like STL
+    return [g]
   }
-  const gltf = await new GLTFLoader().parseAsync(buffer, '')
+  const manager = new LoadingManager()
+  manager.setURLModifier(sanitizeResourceUrl)
+  const gltf = await new GLTFLoader(manager).parseAsync(buffer, '')
   return meshesOf(gltf.scene)
 }
 
@@ -57,8 +134,14 @@ export async function loadModel(file: File, extension: string): Promise<LoadedMo
   let geometries: BufferGeometry[]
   try {
     geometries = await parse(file, extension)
-  } catch {
-    throw new Error(`Could not read "${file.name}". The file may be corrupt or not a valid ${extension.slice(1).toUpperCase()}.`)
+  } catch (e) {
+    if (e instanceof ModelError) throw e
+    console.error(e)
+    let hint = ''
+    if (/draco|meshopt/i.test(String(e instanceof Error && e.message))) {
+      hint = " Compressed (Draco/meshopt) GLB isn't supported yet."
+    }
+    throw new Error(`Could not read "${file.name}". The file may be corrupt or not a valid ${extension.slice(1).toUpperCase()}.${hint}`)
   }
   geometries = geometries.filter((g) => g.getAttribute('position')?.count)
   if (geometries.length === 0) {

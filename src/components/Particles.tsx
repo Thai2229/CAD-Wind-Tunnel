@@ -1,17 +1,23 @@
 import { useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
-import { velocityAt, type Obstacle } from '../lib/flowField'
+import { velocityAt, type Obstacle, type Vec3 } from '../lib/flowField'
 import { SECTION } from '../lib/tunnel'
 
 const { L, W, H } = SECTION
 const COUNT = 3000
 
 function spawn(a: Float32Array, i: number, anywhere: boolean) {
-  a[i * 3] = -L / 2 + Math.random() * (L * (anywhere && 1 || 0.03))
+  let span = 0.03
+  if (anywhere) span = 1
+  a[i * 3] = -L / 2 + Math.random() * L * span
   a[i * 3 + 1] = 0.1 + Math.random() * (H - 0.2)
   a[i * 3 + 2] = (Math.random() * 2 - 1) * (W / 2 - 0.1)
 }
+
+// scratch vectors reused every frame
+const p: Vec3 = [0, 0, 0]
+const v: Vec3 = [0, 0, 0]
 
 type Props = { obstacle: Obstacle; speed: number }
 
@@ -32,14 +38,20 @@ export function Particles({ obstacle, speed }: Props) {
     const dt = Math.min(delta, 0.05)
     const positions = geometry.getAttribute('position').array as Float32Array
     for (let i = 0; i < COUNT; i++) {
-      const v = velocityAt([positions[i * 3]!, positions[i * 3 + 1]!, positions[i * 3 + 2]!], obstacle, vis)
-      const s = Math.hypot(...v)
-      positions[i * 3] += v[0] * dt
-      positions[i * 3 + 1] += v[1] * dt
-      positions[i * 3 + 2] += v[2] * dt
-      const x = positions[i * 3]!
-      const y = positions[i * 3 + 1]!
-      if (x > L / 2 || s < 0.05 * vis || y < 0.02 || y > H - 0.02) spawn(positions, i, false)
+      p[0] = positions[i * 3]!
+      p[1] = positions[i * 3 + 1]!
+      p[2] = positions[i * 3 + 2]!
+      velocityAt(p, obstacle, vis, v)
+      const s = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+      const x = p[0] + v[0] * dt
+      const y = p[1] + v[1] * dt
+      const z = p[2] + v[2] * dt
+      positions[i * 3] = x
+      positions[i * 3 + 1] = y
+      positions[i * 3 + 2] = z
+      if (!Number.isFinite(x + y + z + s) || x > L / 2 || s < 0.05 * vis || y < 0.02 || y > H - 0.02) {
+        spawn(positions, i, false)
+      }
     }
     geometry.getAttribute('position').needsUpdate = true
   })

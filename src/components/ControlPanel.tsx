@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { LengthUnit } from '../lib/aero'
 import { PressureLegend } from './PressureLegend'
 
@@ -41,26 +42,46 @@ type SliderProps = {
   onChange: (v: number) => void
 }
 
+type NumberInputProps = {
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (v: number) => void
+  id?: string
+  label?: string
+}
+
+// Keeps the typed text locally so the field can be cleared while typing.
+function NumberInput({ value, min, max, step, onChange, id, label }: NumberInputProps) {
+  const [text, setText] = useState<string | null>(null)
+  return (
+    <input
+      type="number"
+      className="num"
+      id={id}
+      aria-label={label}
+      min={min}
+      max={max}
+      step={step}
+      value={text ?? String(value)}
+      onChange={(e) => {
+        const raw = e.target.value
+        setText(raw)
+        if (raw !== '' && Number.isFinite(Number(raw))) onChange(Math.min(max, Math.max(min, Number(raw))))
+      }}
+      onBlur={() => setText(null)}
+    />
+  )
+}
+
 function SliderField({ id, label, unit, min, max, step, value, onChange }: SliderProps) {
-  const set = (raw: string) => {
-    const v = Number(raw)
-    if (raw !== '' && Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)))
-  }
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
       <div className="field-row">
-        <input type="range" id={id} min={min} max={max} step={step} value={value} onChange={(e) => set(e.target.value)} />
-        <input
-          type="number"
-          className="num"
-          aria-label={`${label} value`}
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => set(e.target.value)}
-        />
+        <input type="range" id={id} min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+        <NumberInput value={value} min={min} max={max} step={step} onChange={onChange} label={`${label} value`} />
         <span className="unit num">{unit}</span>
       </div>
     </div>
@@ -124,18 +145,7 @@ export function ControlPanel(p: Props) {
         <SliderField id="yaw" label="Yaw angle" unit="deg" min={-90} max={90} step={1} value={p.yaw} onChange={p.setYaw} />
         <div className="field">
           <label htmlFor="cd">Drag coefficient Cd</label>
-          <input
-            id="cd"
-            type="number"
-            className="num"
-            min={0}
-            step={0.05}
-            value={p.cd}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              if (e.target.value !== '' && Number.isFinite(v) && v >= 0) p.setCd(v)
-            }}
-          />
+          <NumberInput id="cd" value={p.cd} min={0} max={Infinity} step={0.05} onChange={p.setCd} />
           <p className="hint">Estimate, e.g. 0.3 car, 1.0 bluff body</p>
         </div>
       </section>

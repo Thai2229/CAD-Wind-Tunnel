@@ -1,10 +1,11 @@
 import { useMemo, useRef, useState, type DragEvent } from 'react'
+import { TURNTABLE_TOP } from './lib/tunnel'
 import { TunnelScene } from './components/TunnelScene'
 import { ControlPanel, type Readouts } from './components/ControlPanel'
 import { UploadOverlay } from './components/UploadOverlay'
 import { dragForce, dynamicPressure, frontalAreaFromBox, reynoldsNumber, unitToMeters, type LengthUnit } from './lib/aero'
 import type { Obstacle, Vec3 } from './lib/flowField'
-import { loadModel, type LoadedModel } from './lib/loadModel'
+import { loadModel, suggestedUnit, type LoadedModel } from './lib/loadModel'
 import { validateUpload } from './lib/validateUpload'
 import { cx } from './lib/cx'
 import './App.css'
@@ -29,6 +30,7 @@ export default function App() {
   const [showParticles, setShowParticles] = useState(true)
   const [showPressure, setShowPressure] = useState(true)
   const input = useRef<HTMLInputElement>(null)
+  const requestId = useRef(0)
 
   const handleFiles = async (files: ArrayLike<File>) => {
     const result = validateUpload(files)
@@ -38,12 +40,20 @@ export default function App() {
     }
     setError(null)
     setLoading(true)
+    requestId.current += 1
+    const id = requestId.current
     try {
-      setModel(await loadModel(result.file, result.extension))
+      const loaded = await loadModel(result.file, result.extension)
+      if (id !== requestId.current) return
+      setModel(loaded)
+      setUnit(suggestedUnit(result.extension))
     } catch (e) {
-      setError(e instanceof Error && e.message || 'Could not read this file.')
+      if (id !== requestId.current) return
+      let message = 'Could not read this file.'
+      if (e instanceof Error) message = e.message
+      setError(message)
     } finally {
-      setLoading(false)
+      if (id === requestId.current) setLoading(false)
     }
   }
 
@@ -60,7 +70,10 @@ export default function App() {
     const c = Math.abs(Math.cos(yawRad))
     const s = Math.abs(Math.sin(yawRad))
     const half: Vec3 = [(sx * c + sz * s) / 2, sy / 2, (sx * s + sz * c) / 2]
-    return { center: [0, sy / 2, 0], halfExtents: half }
+    // flat models keep a tiny thickness so the flow field stays finite
+    const min = Math.max(1e-3 * Math.max(...half), 1e-6)
+    const clamped: Vec3 = [Math.max(half[0], min), Math.max(half[1], min), Math.max(half[2], min)]
+    return { center: [0, sy / 2 + TURNTABLE_TOP, 0], halfExtents: clamped }
   }, [model, yawRad])
 
   const q = dynamicPressure(speed)
@@ -114,7 +127,7 @@ export default function App() {
           hidden
           accept=".stl,.obj,.glb,.ply"
           onChange={(e) => {
-            void handleFiles(e.target.files || [])
+            void handleFiles(e.target.files ?? [])
             e.target.value = ''
           }}
         />
@@ -122,6 +135,8 @@ export default function App() {
       <ControlPanel
         fileName={model && model.name}
         onRemove={() => {
+          requestId.current += 1
+          setLoading(false)
           setModel(null)
           setError(null)
         }}
