@@ -1,17 +1,17 @@
-# CAD Wind Tunnel: Project Plan
+# CAD Wind Tunnel plan
 
 A website where someone uploads a 3D/CAD model and watches it sit in a virtual wind tunnel, with smoke streams flowing around it, a pressure map painted on its surface and live readouts for drag.
 
 ## What real wind tunnels look like (and what we borrow)
 
-- **Test section**: a long rectangular chamber with glass walls, a floor turntable the model sits on, and a contraction cone upstream. We render this as a translucent box with a grid floor and a turntable.
-- **Smoke visualization**: smoke rakes release thin streams in front of the model so you can see the air split and curl around it. We draw streamlines and moving particles.
-- **Pressure-sensitive paint / CFD heat maps**: red where air hits hard (high pressure), blue where it speeds up (low pressure). We color the model's surface the same way.
-- **Control room panel**: airspeed, yaw angle on the turntable, and a balance readout (drag force). We put these in a side panel.
+- Test section: a long rectangular chamber with glass walls, a floor turntable the model sits on, and a contraction cone upstream. We render this as a translucent box with a grid floor and a turntable.
+- Smoke visualization: smoke rakes release thin streams in front of the model so you can see the air split and curl around it. We draw streamlines and moving particles.
+- Pressure-sensitive paint / CFD heat maps: red where air hits hard (high pressure), blue where it speeds up (low pressure). We color the model's surface the same way.
+- Control room panel: airspeed, yaw angle on the turntable, and a balance readout (drag force). We put these in a side panel.
 
-## Honest scope note
+## Physics scope
 
-Real wind tunnel results need computational fluid dynamics (CFD), which is far too heavy for a browser draft. Phase 1 uses **potential flow** around a shape that approximates the model (an ellipsoid fitted to its bounding box) plus a surface pressure estimate from each face's angle to the wind. It looks right and reacts to the model's size and orientation, but it is a visualization, not an engineering result. The UI says so.
+Real wind tunnel results need computational fluid dynamics (CFD), which is far too heavy for a browser draft. Phase 1 uses potential flow around a shape that approximates the model (an ellipsoid fitted to its bounding box) plus a surface pressure estimate from each face's angle to the wind. It reacts to the model's size and orientation, but the numbers are not engineering results, and the UI says so.
 
 ## Phases
 
