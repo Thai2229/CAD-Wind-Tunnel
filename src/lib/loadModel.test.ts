@@ -4,6 +4,7 @@ import {
   MAX_VERTICES,
   assertModelBudget,
   sanitizeResourceUrl,
+  loadModel,
   suggestedUnit,
 } from './loadModel'
 
@@ -53,5 +54,42 @@ describe('suggestedUnit', () => {
   })
   it.each(['.stl', '.obj', '.ply'])('suggests mm for %s', (ext) => {
     expect(suggestedUnit(ext)).toBe('mm')
+  })
+})
+
+describe('loadModel (.ply)', () => {
+  const ply = (vertices: string[], faces: string[]) =>
+    [
+      'ply',
+      'format ascii 1.0',
+      `element vertex ${vertices.length}`,
+      'property float x',
+      'property float y',
+      'property float z',
+      `element face ${faces.length}`,
+      'property list uchar int vertex_indices',
+      'end_header',
+      ...vertices,
+      ...faces,
+    ].join('\n') + '\n'
+  const asFile = (name: string, text: string) => {
+    const bytes = new TextEncoder().encode(text)
+    return {
+      name,
+      size: bytes.length,
+      arrayBuffer: async () => bytes.buffer,
+      text: async () => text,
+    } as unknown as File
+  }
+
+  it('rejects a face-less PLY even when the vertex count is a multiple of 3', async () => {
+    const cloud = ply(['0 0 0', '1 0 0', '0 1 0', '1 1 0', '0 0 1', '1 0 1'], [])
+    await expect(loadModel(asFile('cloud.ply', cloud), '.ply')).rejects.toThrow(/point cloud|no faces/i)
+  })
+
+  it('loads a PLY with one triangle', async () => {
+    const tri = ply(['0 0 0', '1 0 0', '0 1 0'], ['3 0 1 2'])
+    const model = await loadModel(asFile('tri.ply', tri), '.ply')
+    expect(model.geometries).toHaveLength(1)
   })
 })

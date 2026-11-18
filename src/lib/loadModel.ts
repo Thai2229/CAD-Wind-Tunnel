@@ -84,18 +84,29 @@ function meshesOf(root: Object3D): BufferGeometry[] {
   root.traverse((o) => {
     if (o instanceof Mesh) meshes.push(o)
   })
-  assertModelBudget(meshes.map((m) => m.geometry.getAttribute('position')?.count || 0))
+  try {
+    assertModelBudget(meshes.map((m) => m.geometry.getAttribute('position')?.count || 0))
+  } catch (e) {
+    for (const m of meshes) {
+      m.geometry.dispose()
+      for (const mat of [m.material].flat()) disposeMaterial(mat)
+    }
+    throw e
+  }
   root.updateMatrixWorld(true)
   const out: BufferGeometry[] = []
+  const seen = new Set<BufferGeometry>()
   for (const m of meshes) {
-    const identity = m.matrixWorld.equals(IDENTITY)
+    // reuse the source geometry only for its first identity-matrix mesh
+    const identity = m.matrixWorld.equals(IDENTITY) && !seen.has(m.geometry)
+    seen.add(m.geometry)
     let g = m.geometry as BufferGeometry
     if (!identity) g = g.clone()
     toFloat32(g)
     if (!identity) g.applyMatrix4(m.matrixWorld)
     out.push(g)
-    // geometries we clone (or no longer reference) are released; reused ones now belong to the model
-    if (!identity) m.geometry.dispose()
+    // sources we cloned are released; reused ones now belong to the model
+    if (!identity && !out.includes(m.geometry)) m.geometry.dispose()
     for (const mat of [m.material].flat()) disposeMaterial(mat)
   }
   return out
@@ -117,8 +128,9 @@ async function parse(file: File, extension: string): Promise<BufferGeometry[]> {
     const g = new PLYLoader().parse(buffer)
     const count = g.getAttribute('position')?.count || 0
     assertModelBudget([count])
+    // PLYLoader only sets an index when the file has faces
     const index = g.getIndex()
-    if (count === 0 || (!index && count % 3 !== 0) || (index && index.count < 3)) {
+    if (count === 0 || !index || index.count < 3) {
       throw new ModelError(`"${file.name}" has no faces. Point clouds are not supported; use a meshed PLY.`)
     }
     g.rotateX(-Math.PI / 2) // treated as Z-up like STL
@@ -138,7 +150,9 @@ export async function loadModel(file: File, extension: string): Promise<LoadedMo
     if (e instanceof ModelError) throw e
     console.error(e)
     let hint = ''
-    if (/draco|meshopt/i.test(String(e instanceof Error && e.message))) {
+    let detail = ''
+    if (e instanceof Error) detail = e.message
+    if (/draco|meshopt/i.test(detail)) {
       hint = " Compressed (Draco/meshopt) GLB isn't supported yet."
     }
     throw new Error(`Could not read "${file.name}". The file may be corrupt or not a valid ${extension.slice(1).toUpperCase()}.${hint}`)
