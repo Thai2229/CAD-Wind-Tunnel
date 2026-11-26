@@ -1,5 +1,8 @@
 export const ACCEPTED_EXTENSIONS = ['.stl', '.obj', '.glb', '.ply', '.step', '.stp', '.iges', '.igs']
 export const MAX_FILE_BYTES = 50 * 1024 * 1024
+export const MAX_CAD_FILE_BYTES = 20 * 1024 * 1024
+
+const CAD_EXTENSIONS = ['.step', '.stp', '.iges', '.igs']
 
 export type UploadResult<F extends { name: string; size: number } = { name: string; size: number }> =
   | { ok: true; file: F; extension: string }
@@ -18,5 +21,8 @@ export function validateUpload<F extends { name: string; size: number }>(
   }
   if (file.size === 0) return { ok: false, error: 'This file is empty.' }
   if (file.size > MAX_FILE_BYTES) return { ok: false, error: 'File is too large. The limit is 50 MB.' }
+  if (file.size > MAX_CAD_FILE_BYTES && CAD_EXTENSIONS.includes(extension)) {
+    return { ok: false, error: 'STEP and IGES files are limited to 20 MB. Export a simpler model or another format.' }
+  }
   return { ok: true, file, extension }
 }

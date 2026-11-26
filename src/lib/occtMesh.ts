@@ -14,9 +14,27 @@ export type OcctMeshData = {
 }
 
 // Converts occt-import-js output to typed arrays, dropping empty meshes.
-export function occtToMeshData(result: OcctResult): OcctMeshData[] {
+export const MAX_CAD_TRIANGLES = 3_000_000
+export const MAX_CAD_MESHES = 500
+
+// Thrown for models over the budget; shown to the user as is.
+export class CadLimitError extends Error {}
+
+export type OcctLimits = { maxTriangles: number; maxMeshes: number }
+
+export function occtToMeshData(
+  result: OcctResult,
+  limits: OcctLimits = { maxTriangles: MAX_CAD_TRIANGLES, maxMeshes: MAX_CAD_MESHES },
+): OcctMeshData[] {
   const out: OcctMeshData[] = []
-  if (result.success) {
+  // a failed read can come back without a meshes array
+  if (result.success && Array.isArray(result.meshes)) {
+    // check sizes from .length alone, before any copy
+    let triangles = 0
+    for (const m of result.meshes) triangles += m.index.array.length / 3
+    if (result.meshes.length > limits.maxMeshes || triangles > limits.maxTriangles) {
+      throw new CadLimitError('This CAD model is too complex for the browser. Simplify it or export a coarser model and try again.')
+    }
     for (const m of result.meshes) {
       if (m.index.array.length === 0 || m.attributes.position.array.length === 0) continue
       const positions = Float32Array.from(m.attributes.position.array)

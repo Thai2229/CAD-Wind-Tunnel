@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   MAX_MESHES,
   MAX_VERTICES,
   assertModelBudget,
   sanitizeResourceUrl,
   loadModel,
+  retryableOnce,
   suggestedUnit,
 } from './loadModel'
 
@@ -91,5 +92,42 @@ describe('loadModel (.ply)', () => {
     const tri = ply(['0 0 0', '1 0 0', '0 1 0'], ['3 0 1 2'])
     const model = await loadModel(asFile('tri.ply', tri), '.ply')
     expect(model.geometries).toHaveLength(1)
+  })
+})
+
+describe('retryableOnce', () => {
+  it('does not call the factory at creation', () => {
+    const factory = vi.fn(async () => 1)
+    retryableOnce(factory)
+    expect(factory).not.toHaveBeenCalled()
+  })
+
+  it('shares one promise between concurrent callers', async () => {
+    const factory = vi.fn(async () => 'x')
+    const get = retryableOnce(factory)
+    const a = get()
+    const b = get()
+    expect(a).toBe(b)
+    expect(await Promise.all([a, b])).toEqual(['x', 'x'])
+    expect(factory).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches a successful result across sequential calls', async () => {
+    const factory = vi.fn(async () => 'x')
+    const get = retryableOnce(factory)
+    await get()
+    await get()
+    expect(factory).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls the factory again after a rejection', async () => {
+    const factory = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce('ok')
+    const get = retryableOnce(factory)
+    await expect(get()).rejects.toThrow('boom')
+    await expect(get()).resolves.toBe('ok')
+    expect(factory).toHaveBeenCalledTimes(2)
   })
 })

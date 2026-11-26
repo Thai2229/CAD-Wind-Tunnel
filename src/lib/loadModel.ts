@@ -18,7 +18,7 @@ import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import type { Vec3 } from './flowField'
 import type { LengthUnit } from './aero'
 import { SECTION } from './tunnel'
-import { occtToMeshData, stepFormatError, type OcctMeshData } from './occtMesh'
+import { CadLimitError, occtToMeshData, stepFormatError, type OcctMeshData } from './occtMesh'
 
 const IDENTITY = new Matrix4()
 
@@ -54,8 +54,6 @@ export function assertModelBudget(vertexCounts: number[]): void {
 
 // occt-import-js is several MB of wasm: load it only when a STEP/IGES file arrives,
 // and serve the wasm from our own origin.
-let occtPromise: ReturnType<typeof initOcct> | null = null
-
 async function initOcct() {
   const [{ default: init }, { default: wasmUrl }] = await Promise.all([
     import('occt-import-js'),
@@ -64,22 +62,41 @@ async function initOcct() {
   return init({ locateFile: () => wasmUrl })
 }
 
-function loadOcct() {
-  if (!occtPromise) occtPromise = initOcct()
-  return occtPromise
+// Caches a successful load; a failed one is forgotten so the next drop retries.
+export function retryableOnce<T>(factory: () => Promise<T>): () => Promise<T> {
+  let promise: Promise<T> | null = null
+  return () => {
+    if (!promise) {
+      promise = factory().catch((e: unknown) => {
+        promise = null
+        throw e
+      })
+    }
+    return promise
+  }
 }
+
+const loadOcct = retryableOnce(initOcct)
 
 async function parseCad(file: File, extension: string): Promise<BufferGeometry[]> {
   let data: OcctMeshData[]
+  let occt: Awaited<ReturnType<typeof initOcct>>
   try {
-    const occt = await loadOcct()
+    occt = await loadOcct()
+  } catch (e) {
+    console.error(e)
+    throw new ModelError('Could not load the STEP/IGES reader. Check your connection and try again.')
+  }
+  try {
     const bytes = new Uint8Array(await file.arrayBuffer())
+    // shortcut: parses on the main thread; move to a Worker with a watchdog so a heavy STEP file can't freeze the tab, and drop 'unsafe-eval' from the main document CSP
     if (extension === '.step' || extension === '.stp') {
       data = occtToMeshData(occt.ReadStepFile(bytes, null))
     } else {
       data = occtToMeshData(occt.ReadIgesFile(bytes, null))
     }
   } catch (e) {
+    if (e instanceof CadLimitError) throw new ModelError(e.message)
     console.error(e)
     let detail = ''
     if (e instanceof Error) detail = e.message

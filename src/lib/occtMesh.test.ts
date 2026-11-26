@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { occtToMeshData, stepFormatError, type OcctResult } from './occtMesh'
+import { MAX_CAD_TRIANGLES, occtToMeshData, stepFormatError, type OcctResult } from './occtMesh'
 
 const tri = (extra: Partial<OcctResult['meshes'][number]['attributes']> = {}) => ({
   attributes: { position: { array: [0, 0, 0, 1, 0, 0, 0, 1, 0] }, ...extra },
@@ -82,5 +82,41 @@ describe('stepFormatError', () => {
     const msg = stepFormatError('.xyz', 'boom')
     expect(msg).toMatch(/CAD/)
     expect(msg).toContain('boom')
+  })
+})
+
+describe('occtToMeshData budget guard', () => {
+  const fake = (triangles: number) => ({
+    attributes: { position: { array: [0, 0, 0, 1, 0, 0, 0, 1, 0] } },
+    index: { array: { length: triangles * 3 } as unknown as number[] },
+  })
+  const small = { maxTriangles: 4, maxMeshes: 3 }
+
+  it('exports the default triangle cap', () => {
+    expect(MAX_CAD_TRIANGLES).toBe(3_000_000)
+  })
+
+  it('throws when total triangles exceed the limit', () => {
+    expect(() => occtToMeshData({ success: true, meshes: [fake(5)] }, small)).toThrow(/too (complex|large|many)/i)
+  })
+
+  it('sums triangles across meshes', () => {
+    expect(() => occtToMeshData({ success: true, meshes: [fake(2), fake(3)] }, small)).toThrow(/too (complex|large|many)/i)
+  })
+
+  it('throws when there are too many meshes', () => {
+    const meshes = [tri(), tri(), tri(), tri()]
+    expect(() => occtToMeshData({ success: true, meshes }, small)).toThrow(/too (complex|large|many)/i)
+  })
+
+  it('allows exactly the triangle and mesh limits', () => {
+    const meshes = [tri(), tri(), { ...tri(), index: { array: [0, 1, 2, 0, 1, 2] } }]
+    const out = occtToMeshData({ success: true, meshes }, { maxTriangles: 4, maxMeshes: 3 })
+    expect(out).toHaveLength(3)
+  })
+
+  it('applies the default limit of MAX_CAD_TRIANGLES before copying', () => {
+    const result = { success: true, meshes: [fake(MAX_CAD_TRIANGLES + 1)] }
+    expect(() => occtToMeshData(result)).toThrow(/too (complex|large|many)/i)
   })
 })

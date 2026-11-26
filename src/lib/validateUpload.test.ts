@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACCEPTED_EXTENSIONS, MAX_FILE_BYTES, validateUpload } from './validateUpload'
+import { ACCEPTED_EXTENSIONS, MAX_CAD_FILE_BYTES, MAX_FILE_BYTES, validateUpload } from './validateUpload'
 
 const f = (name: string, size = 1024) => ({ name, size })
 
@@ -88,5 +88,27 @@ describe('validateUpload', () => {
     const result = validateUpload([f('a.stl', MAX_FILE_BYTES + 1)])
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toMatch(/large|size|50/i)
+  })
+
+  it('exports a 20 MB cap for CAD files', () => {
+    expect(MAX_CAD_FILE_BYTES).toBe(20 * 1024 * 1024)
+  })
+
+  it.each(['.step', '.stp', '.iges', '.igs'])('accepts a %s file exactly at the CAD cap', (ext) => {
+    expect(validateUpload([f(`a${ext}`, MAX_CAD_FILE_BYTES)]).ok).toBe(true)
+  })
+
+  it.each(['.step', '.stp', '.iges', '.igs', '.STEP'])('rejects a %s file one byte over the CAD cap', (ext) => {
+    const result = validateUpload([f(`a${ext}`, MAX_CAD_FILE_BYTES + 1)])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/too large|size|20/i)
+  })
+
+  it('still accepts a 30 MB stl', () => {
+    expect(validateUpload([f('a.stl', 30 * 1024 * 1024)]).ok).toBe(true)
+  })
+
+  it('still rejects a 50 MB + 1 stl', () => {
+    expect(validateUpload([f('a.stl', MAX_FILE_BYTES + 1)]).ok).toBe(false)
   })
 })
