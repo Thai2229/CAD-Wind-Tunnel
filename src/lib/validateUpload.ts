@@ -1,4 +1,4 @@
-export const ACCEPTED_EXTENSIONS = ['.stl', '.obj', '.glb', '.ply']
+export const ACCEPTED_EXTENSIONS = ['.stl', '.obj', '.glb', '.ply', '.step', '.stp', '.iges', '.igs']
 export const MAX_FILE_BYTES = 50 * 1024 * 1024
 
 export type UploadResult<F extends { name: string; size: number } = { name: string; size: number }> =
@@ -8,7 +8,7 @@ export type UploadResult<F extends { name: string; size: number } = { name: stri
 export function validateUpload<F extends { name: string; size: number }>(
   files: ArrayLike<F>,
 ): UploadResult<F> {
-  if (files.length === 0) return { ok: false, error: 'No file selected. Choose an STL, OBJ, GLB or PLY file.' }
+  if (files.length === 0) return { ok: false, error: 'No file selected. Choose an STL, OBJ, GLB, PLY, STEP or IGES file.' }
   if (files.length > 1) return { ok: false, error: 'Upload one model at a time.' }
   const file = files[0]!
   const dot = file.name.lastIndexOf('.')

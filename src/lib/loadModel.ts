@@ -2,10 +2,11 @@ import {
   Box3,
   LoadingManager,
   Matrix4,
+  BufferGeometry,
   Float32BufferAttribute,
+  Uint32BufferAttribute,
   Mesh,
   Vector3,
-  type BufferGeometry,
   type Material,
   type Object3D,
   type Texture,
@@ -17,6 +18,7 @@ import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import type { Vec3 } from './flowField'
 import type { LengthUnit } from './aero'
 import { SECTION } from './tunnel'
+import { occtToMeshData, stepFormatError, type OcctMeshData } from './occtMesh'
 
 const IDENTITY = new Matrix4()
 
@@ -49,6 +51,52 @@ export function assertModelBudget(vertexCounts: number[]): void {
     throw new ModelError('This model is too complex for the browser (limit: 3 million vertices, 500 meshes). Simplify or decimate it and try again.')
   }
 }
+
+// occt-import-js is several MB of wasm: load it only when a STEP/IGES file arrives,
+// and serve the wasm from our own origin.
+let occtPromise: ReturnType<typeof initOcct> | null = null
+
+async function initOcct() {
+  const [{ default: init }, { default: wasmUrl }] = await Promise.all([
+    import('occt-import-js'),
+    import('occt-import-js/dist/occt-import-js.wasm?url'),
+  ])
+  return init({ locateFile: () => wasmUrl })
+}
+
+function loadOcct() {
+  if (!occtPromise) occtPromise = initOcct()
+  return occtPromise
+}
+
+async function parseCad(file: File, extension: string): Promise<BufferGeometry[]> {
+  let data: OcctMeshData[]
+  try {
+    const occt = await loadOcct()
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (extension === '.step' || extension === '.stp') {
+      data = occtToMeshData(occt.ReadStepFile(bytes, null))
+    } else {
+      data = occtToMeshData(occt.ReadIgesFile(bytes, null))
+    }
+  } catch (e) {
+    console.error(e)
+    let detail = ''
+    if (e instanceof Error) detail = e.message
+    throw new ModelError(stepFormatError(extension, detail))
+  }
+  assertModelBudget(data.map((d) => d.positions.length / 3))
+  return data.map((d) => {
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute(d.positions, 3))
+    if (d.normals) g.setAttribute('normal', new Float32BufferAttribute(d.normals, 3))
+    g.setIndex(new Uint32BufferAttribute(d.indices, 1))
+    g.rotateX(-Math.PI / 2) // CAD STEP/IGES is Z-up, the scene is Y-up
+    return g
+  })
+}
+
+const CAD_EXTENSIONS = ['.step', '.stp', '.iges', '.igs']
 
 const SUGGESTED_UNIT: Record<string, LengthUnit> = { '.glb': 'm' }
 
@@ -113,6 +161,7 @@ function meshesOf(root: Object3D): BufferGeometry[] {
 }
 
 async function parse(file: File, extension: string): Promise<BufferGeometry[]> {
+  if (CAD_EXTENSIONS.includes(extension)) return parseCad(file, extension)
   if (extension === '.obj') {
     return meshesOf(new OBJLoader().parse(await file.text()))
   }

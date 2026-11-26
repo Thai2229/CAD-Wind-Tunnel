@@ -52,7 +52,7 @@ describe('suggestedUnit', () => {
   it('suggests meters for glb', () => {
     expect(suggestedUnit('.glb')).toBe('m')
   })
-  it.each(['.stl', '.obj', '.ply'])('suggests mm for %s', (ext) => {
+  it.each(['.stl', '.obj', '.ply', '.step', '.stp', '.iges', '.igs'])('suggests mm for %s', (ext) => {
     expect(suggestedUnit(ext)).toBe('mm')
   })
 })

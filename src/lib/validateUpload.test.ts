@@ -5,7 +5,7 @@ const f = (name: string, size = 1024) => ({ name, size })
 
 describe('constants', () => {
   it('lists accepted extensions and the 50 MB limit', () => {
-    expect(ACCEPTED_EXTENSIONS).toEqual(['.stl', '.obj', '.glb', '.ply'])
+    expect(ACCEPTED_EXTENSIONS).toEqual(['.stl', '.obj', '.glb', '.ply', '.step', '.stp', '.iges', '.igs'])
     expect(MAX_FILE_BYTES).toBe(50 * 1024 * 1024)
   })
 })
@@ -15,6 +15,21 @@ describe('validateUpload', () => {
     const file = f(`model${ext}`)
     const result = validateUpload([file])
     expect(result).toEqual({ ok: true, file, extension: ext })
+  })
+
+  it.each(['.step', '.stp', '.iges', '.igs'])('accepts CAD extension %s and returns the file', (ext) => {
+    const file = f(`part${ext}`)
+    expect(validateUpload([file])).toEqual({ ok: true, file, extension: ext })
+  })
+
+  it.each([
+    ['PART.STEP', '.step'],
+    ['Part.StP', '.stp'],
+    ['PART.IGES', '.iges'],
+    ['PART.IGS', '.igs'],
+  ])('accepts uppercase CAD name %s and returns %s', (name, ext) => {
+    const file = f(name)
+    expect(validateUpload([file])).toEqual({ ok: true, file, extension: ext })
   })
 
   it('accepts uppercase extensions and returns lowercase', () => {
@@ -54,7 +69,7 @@ describe('validateUpload', () => {
     if (!result.ok) expect(result.error).toMatch(/one model/i)
   })
 
-  it.each(['model.step', 'noext', 'archive.stl.zip', 'model.', '.gitignore', 'a.fbx'])(
+  it.each(['model.dwg', 'noext', 'archive.stl.zip', 'model.', '.gitignore', 'a.fbx'])(
     'rejects unsupported name %s',
     (name) => {
       const result = validateUpload([f(name)])

@@ -125,7 +125,7 @@ export default function App() {
           ref={input}
           type="file"
           hidden
-          accept=".stl,.obj,.glb,.ply"
+          accept=".stl,.obj,.glb,.ply,.step,.stp,.iges,.igs"
           onChange={(e) => {
             void handleFiles(e.target.files ?? [])
             e.target.value = ''
