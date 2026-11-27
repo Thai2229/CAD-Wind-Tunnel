@@ -18,7 +18,9 @@ import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import type { Vec3 } from './flowField'
 import type { LengthUnit } from './aero'
 import { SECTION } from './tunnel'
-import { CadLimitError, occtToMeshData, stepFormatError, type OcctMeshData } from './occtMesh'
+import type { OcctMeshData } from './occtMesh'
+import { WorkerCallError, callWorker, type WorkerLike } from './workerClient'
+import { READER_LOAD_FAILED, type ParseRequest } from './workerProtocol'
 
 const IDENTITY = new Matrix4()
 
@@ -52,16 +54,6 @@ export function assertModelBudget(vertexCounts: number[]): void {
   }
 }
 
-// occt-import-js is several MB of wasm: load it only when a STEP/IGES file arrives,
-// and serve the wasm from our own origin.
-async function initOcct() {
-  const [{ default: init }, { default: wasmUrl }] = await Promise.all([
-    import('occt-import-js'),
-    import('occt-import-js/dist/occt-import-js.wasm?url'),
-  ])
-  return init({ locateFile: () => wasmUrl })
-}
-
 // Caches a successful load; a failed one is forgotten so the next drop retries.
 export function retryableOnce<T>(factory: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | null = null
@@ -76,31 +68,30 @@ export function retryableOnce<T>(factory: () => Promise<T>): () => Promise<T> {
   }
 }
 
-const loadOcct = retryableOnce(initOcct)
-
 async function parseCad(file: File, extension: string): Promise<BufferGeometry[]> {
   let data: OcctMeshData[]
-  let occt: Awaited<ReturnType<typeof initOcct>>
   try {
-    occt = await loadOcct()
+    const bytes = await file.arrayBuffer()
+    // fresh worker per file: a failed load is retried on the next drop (the wasm is HTTP-cached)
+    const worker = new Worker(new URL('../workers/cadParse.worker.ts', import.meta.url), { type: 'module' })
+    data = await callWorker<ParseRequest, OcctMeshData[]>(
+      worker as unknown as WorkerLike,
+      { extension, bytes },
+      { transfer: [bytes] },
+    )
   } catch (e) {
+    let message = ''
+    let kind = ''
+    let limit = false
+    if (e instanceof WorkerCallError) {
+      message = e.message
+      kind = e.kind
+      limit = e.limit
+    }
+    if (kind === 'timeout' || limit) throw new ModelError(message)
+    if (kind === 'reply' && message !== READER_LOAD_FAILED) throw new ModelError(message)
     console.error(e)
     throw new ModelError('Could not load the STEP/IGES reader. Check your connection and try again.')
-  }
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    // shortcut: parses on the main thread; move to a Worker with a watchdog so a heavy STEP file can't freeze the tab, and drop 'unsafe-eval' from the main document CSP
-    if (extension === '.step' || extension === '.stp') {
-      data = occtToMeshData(occt.ReadStepFile(bytes, null))
-    } else {
-      data = occtToMeshData(occt.ReadIgesFile(bytes, null))
-    }
-  } catch (e) {
-    if (e instanceof CadLimitError) throw new ModelError(e.message)
-    console.error(e)
-    let detail = ''
-    if (e instanceof Error) detail = e.message
-    throw new ModelError(stepFormatError(extension, detail))
   }
   assertModelBudget(data.map((d) => d.positions.length / 3))
   return data.map((d) => {
