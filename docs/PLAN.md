@@ -11,7 +11,7 @@ A website where someone uploads a 3D/CAD model and watches it sit in a virtual w
 
 ## Physics scope
 
-Real wind tunnel results need computational fluid dynamics (CFD), which is far too heavy for a browser draft. Phase 1 uses potential flow around a shape that approximates the model (an ellipsoid fitted to its bounding box) plus a surface pressure estimate from each face's angle to the wind. It reacts to the model's size and orientation, but the numbers are not engineering results, and the UI says so.
+Real wind tunnel results need computational fluid dynamics (CFD), which is far too heavy for a browser draft. Phase 1 uses potential flow around a shape that approximates the model (an ellipsoid fitted to its bounding box) plus a surface pressure estimate from each face's angle to the wind. It reacts to the model's size and orientation. Faces past about 90 degrees from the wind blend to a constant base suction (separated flow) and the particles get a simple slowed, jittery wake behind the model; this is a visual approximation, not turbulence. The numbers are not engineering results, and the UI says so.
 
 ## Phases
 

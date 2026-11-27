@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
-import { velocityAt, type Obstacle, type Vec3 } from '../lib/flowField'
+import { applyWake, velocityAt, wakeFactor, type Obstacle, type Vec3 } from '../lib/flowField'
 import { SECTION } from '../lib/tunnel'
 
 const { L, W, H } = SECTION
@@ -9,6 +9,7 @@ const MAX_STEPS = 400
 
 function direction(p: Vec3, o: Obstacle): { dir: Vec3; ratio: number } | null {
   const v = velocityAt(p, o, 1)
+  applyWake(v, wakeFactor(p, o), v) // slower air behind the body: only tints the line, the path is unchanged
   const s = Math.hypot(...v)
   if (!Number.isFinite(s) || s < 1e-4) return null
   return { dir: [v[0] / s, v[1] / s, v[2] / s], ratio: s }

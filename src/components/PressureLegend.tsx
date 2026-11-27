@@ -16,7 +16,7 @@ export function PressureLegend() {
         <span>{CP_MAX}</span>
       </div>
       <div className="legend-caption">Cp: suction (blue), freestream (pale), stagnation (red)</div>
-      <div className="legend-caption">The leeward side also reads high Cp because potential flow has no wake. That is not real.</div>
+      <div className="legend-caption">Behind the model the pressure is held at a constant suction, as in separated flow. Real wakes are unsteady and turbulent; this is a visual approximation.</div>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import type { BufferGeometry } from 'three'
+import { cpFromUpwindCos } from './flowField'
 
 export const CP_MIN = -1.25
 export const CP_MAX = 1
@@ -27,7 +28,7 @@ const rgb: [number, number, number] = [0, 0, 0]
 
 // Writes per-vertex Cp colors for a geometry rotated by yaw (radians) about Y.
 // Wind is +X, so cos(angle) is the rotated normal's x component: nx*cos(yaw) + nz*sin(yaw).
-// Same math as surfacePressureCoefficient, inlined to avoid per-vertex allocations.
+// Same Cp as surfacePressureCoefficient (shared cpFromUpwindCos), without per-vertex allocations.
 export function applyPressureColors(geometry: BufferGeometry, yaw: number) {
   const normal = geometry.getAttribute('normal')
   const color = geometry.getAttribute('color')
@@ -42,7 +43,7 @@ export function applyPressureColors(geometry: BufferGeometry, yaw: number) {
     let cp = 0
     if (len2 > 0) {
       const wx = nx * c + nz * s
-      cp = 1 - 2.25 * (1 - (wx * wx) / len2)
+      cp = cpFromUpwindCos(-wx / Math.sqrt(len2))
     }
     cpColor(cp, rgb)
     color.setXYZ(i, rgb[0], rgb[1], rgb[2])

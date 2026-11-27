@@ -14,7 +14,7 @@ Parsing runs in a background worker, so a heavy file cannot freeze the page, and
 
 ## About the physics
 
-This is a visualization, not CFD. The flow is potential flow around an ellipsoid fitted to the model's bounding box, and the surface pressure comes from each face's angle to the wind. It responds to size and yaw and gives a feel for where air speeds up and where it piles up, but it has no wake or turbulence, and the drag number depends on the Cd you enter. See [docs/PLAN.md](docs/PLAN.md) for how real solvers fit in later.
+This is a visualization, not CFD. The flow is potential flow around an ellipsoid fitted to the model's bounding box, and the surface pressure comes from each face's angle to the wind. It responds to size and yaw and gives a feel for where air speeds up and where it piles up. Faces turned more than about 90 degrees from the wind switch to a constant suction pressure, like separated flow, and the particles slow down and jitter in a simple wake behind the model. That is a visual approximation: there is no real turbulence, and the drag number still depends on the Cd you enter. See [docs/PLAN.md](docs/PLAN.md) for how real solvers fit in later.
 
 ## Run it
 
