@@ -19,8 +19,8 @@ import type { Vec3 } from './flowField'
 import type { LengthUnit } from './aero'
 import { SECTION } from './tunnel'
 import type { OcctMeshData } from './occtMesh'
-import { WorkerCallError, callWorker, type WorkerLike } from './workerClient'
-import { READER_LOAD_FAILED, type ParseRequest } from './workerProtocol'
+import { callWorker, describeCadError, type WorkerLike } from './workerClient'
+import type { ParseRequest } from './workerProtocol'
 
 const IDENTITY = new Matrix4()
 
@@ -54,44 +54,26 @@ export function assertModelBudget(vertexCounts: number[]): void {
   }
 }
 
-// Caches a successful load; a failed one is forgotten so the next drop retries.
-export function retryableOnce<T>(factory: () => Promise<T>): () => Promise<T> {
-  let promise: Promise<T> | null = null
-  return () => {
-    if (!promise) {
-      promise = factory().catch((e: unknown) => {
-        promise = null
-        throw e
-      })
-    }
-    return promise
-  }
-}
-
-async function parseCad(file: File, extension: string): Promise<BufferGeometry[]> {
+async function parseCad(file: File, extension: string, signal?: AbortSignal): Promise<BufferGeometry[]> {
   let data: OcctMeshData[]
+  signal?.throwIfAborted()
   try {
     const bytes = await file.arrayBuffer()
-    // fresh worker per file: a failed load is retried on the next drop (the wasm is HTTP-cached)
+    signal?.throwIfAborted()
+    // fresh worker per file; callWorker terminates it when done, on timeout or on abort
     const worker = new Worker(new URL('../workers/cadParse.worker.ts', import.meta.url), { type: 'module' })
     data = await callWorker<ParseRequest, OcctMeshData[]>(
       worker as unknown as WorkerLike,
       { extension, bytes },
-      { transfer: [bytes] },
+      { transfer: [bytes], signal },
     )
   } catch (e) {
-    let message = ''
-    let kind = ''
-    let limit = false
-    if (e instanceof WorkerCallError) {
-      message = e.message
-      kind = e.kind
-      limit = e.limit
-    }
-    if (kind === 'timeout' || limit) throw new ModelError(message)
-    if (kind === 'reply' && message !== READER_LOAD_FAILED) throw new ModelError(message)
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    const message = describeCadError(e)
+    // cancelled: the caller has already moved on, so stay silent
+    if (message === '') throw new DOMException('Cancelled', 'AbortError')
     console.error(e)
-    throw new ModelError('Could not load the STEP/IGES reader. Check your connection and try again.')
+    throw new ModelError(message)
   }
   assertModelBudget(data.map((d) => d.positions.length / 3))
   return data.map((d) => {
@@ -168,8 +150,8 @@ function meshesOf(root: Object3D): BufferGeometry[] {
   return out
 }
 
-async function parse(file: File, extension: string): Promise<BufferGeometry[]> {
-  if (CAD_EXTENSIONS.includes(extension)) return parseCad(file, extension)
+async function parse(file: File, extension: string, signal?: AbortSignal): Promise<BufferGeometry[]> {
+  if (CAD_EXTENSIONS.includes(extension)) return parseCad(file, extension, signal)
   if (extension === '.obj') {
     return meshesOf(new OBJLoader().parse(await file.text()))
   }
@@ -199,11 +181,16 @@ async function parse(file: File, extension: string): Promise<BufferGeometry[]> {
   return meshesOf(gltf.scene)
 }
 
-export async function loadModel(file: File, extension: string): Promise<LoadedModel> {
+export async function loadModel(
+  file: File,
+  extension: string,
+  options?: { signal?: AbortSignal },
+): Promise<LoadedModel> {
   let geometries: BufferGeometry[]
   try {
-    geometries = await parse(file, extension)
+    geometries = await parse(file, extension, options?.signal)
   } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
     if (e instanceof ModelError) throw e
     console.error(e)
     let hint = ''

@@ -40,3 +40,12 @@ Nothing is stored today. When saved models arrive, the design is:
 ## STEP and IGES worker
 
 The STEP/IGES reader runs in a module worker built to `dist/assets/cadParse.worker-<hash>.js`. `vercel.json` gives that file its own `Content-Security-Policy` (`script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'`) because the library needs `eval`, while the page's policy stays free of `'unsafe-eval'`. If the worker file is renamed or moved, update the `source` pattern in `vercel.json`. Any new host that serves the site must send the same header for that path.
+
+After each deploy, check the headers:
+
+```bash
+curl -sI https://<host>/assets/cadParse.worker-<hash>.js | grep -i content-security
+curl -sI https://<host>/ | grep -i content-security
+```
+
+The worker file should show a policy with `'unsafe-eval'`. The page `/` must not. The reader has 30 seconds to start (download and compile the wasm) and then 60 seconds to parse the file; either limit stops the worker and shows a message.

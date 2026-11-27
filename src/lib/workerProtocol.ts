@@ -33,3 +33,26 @@ export function runParse(
     return { ok: false, error: stepFormatError(extension, detail) }
   }
 }
+
+// Posts a response, transferring its buffers (each once) instead of copying them.
+// If that fails (e.g. a clone error), falls back to a plain error reply so the caller never waits for the timeout.
+export function postResult(post: (msg: unknown, transfer: Transferable[]) => void, response: ParseResponse): void {
+  const buffers = new Set<ArrayBuffer>()
+  if (response.ok) {
+    for (const m of response.result) {
+      buffers.add(m.positions.buffer as ArrayBuffer)
+      buffers.add(m.indices.buffer as ArrayBuffer)
+      if (m.normals) buffers.add(m.normals.buffer as ArrayBuffer)
+    }
+  }
+  try {
+    post(response, [...buffers])
+  } catch (e) {
+    console.error(e)
+    try {
+      post({ ok: false, error: 'Could not send the parsed model back from the reader. Try a simpler model.' }, [])
+    } catch (e2) {
+      console.error(e2)
+    }
+  }
+}

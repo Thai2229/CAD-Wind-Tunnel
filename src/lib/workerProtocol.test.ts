@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CadLimitError, stepFormatError, type OcctResult } from './occtMesh'
 import * as occtMesh from './occtMesh'
-import { runParse } from './workerProtocol'
+import { postResult, runParse, type ParseResponse } from './workerProtocol'
 
 const oneTriangle: OcctResult = {
   success: true,
@@ -102,5 +102,72 @@ describe('runParse', () => {
     })
     const res = runParse(req('.step'), reader)
     expect(res).toEqual({ ok: false, error: stepFormatError('.step', 'wasm exploded') })
+  })
+})
+
+describe('postResult', () => {
+  const okResponse = (...bufs: ArrayBuffer[]): ParseResponse => ({
+    ok: true,
+    result: bufs.map((b) => ({
+      positions: new Float32Array(b),
+      normals: null,
+      indices: new Uint32Array(b),
+    })),
+  })
+
+  it('posts the response with all underlying buffers as the transfer list', () => {
+    const post = vi.fn()
+    const a = new ArrayBuffer(12)
+    const b = new ArrayBuffer(12)
+    const response = okResponse(a, b)
+    postResult(post, response)
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post.mock.calls[0]![0]).toBe(response)
+    expect(post.mock.calls[0]![1]).toEqual([a, b])
+  })
+
+  it('includes normals buffers', () => {
+    const post = vi.fn()
+    const response: ParseResponse = {
+      ok: true,
+      result: [{ positions: new Float32Array(3), normals: new Float32Array(3), indices: new Uint32Array(3) }],
+    }
+    postResult(post, response)
+    expect(post.mock.calls[0]![1]).toHaveLength(3)
+  })
+
+  it('dedupes a buffer shared by several typed arrays', () => {
+    const post = vi.fn()
+    const shared = new ArrayBuffer(12)
+    postResult(post, okResponse(shared))
+    expect(post.mock.calls[0]![1]).toEqual([shared])
+  })
+
+  it('posts an error response with an empty transfer list', () => {
+    const post = vi.fn()
+    const response: ParseResponse = { ok: false, error: 'bad', limit: true }
+    postResult(post, response)
+    expect(post).toHaveBeenCalledWith(response, [])
+  })
+
+  it('posts a plain friendly error without transfer when the first post throws', () => {
+    const post = vi.fn()
+    post.mockImplementationOnce(() => {
+      throw new Error('DataCloneError')
+    })
+    postResult(post, okResponse(new ArrayBuffer(12)))
+    expect(post).toHaveBeenCalledTimes(2)
+    const [msg, transfer] = post.mock.calls[1]! as [{ ok: boolean; error: string }, unknown[]]
+    expect(msg.ok).toBe(false)
+    expect(msg.error).toMatch(/could not send/i)
+    expect(transfer).toEqual([])
+  })
+
+  it('does not retry forever when the fallback post also throws', () => {
+    const post = vi.fn(() => {
+      throw new Error('always')
+    })
+    expect(() => postResult(post, okResponse(new ArrayBuffer(12)))).not.toThrow()
+    expect(post).toHaveBeenCalledTimes(2)
   })
 })
