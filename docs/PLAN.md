@@ -26,6 +26,7 @@ Real wind tunnel results need computational fluid dynamics (CFD), which is far t
 
 ### Phase 2: real CAD formats
 - Done: STEP / IGES support via OpenCASCADE compiled to WebAssembly (`occt-import-js`), loaded on demand since it is several MB.
+- Done: STEP/IGES parsing runs in a Web Worker with a 60 second watchdog.
 - Remaining: B-rep (`.brep`) import if users ask for it.
 - Remaining: better frontal area: rasterize the model's silhouette instead of using the bounding box.
 

@@ -31,6 +31,7 @@ export default function App() {
   const [showPressure, setShowPressure] = useState(true)
   const input = useRef<HTMLInputElement>(null)
   const requestId = useRef(0)
+  const abort = useRef<AbortController | null>(null)
 
   const handleFiles = async (files: ArrayLike<File>) => {
     const result = validateUpload(files)
@@ -42,13 +43,17 @@ export default function App() {
     setLoading(true)
     requestId.current += 1
     const id = requestId.current
+    // terminate a stale STEP/IGES parse right away
+    abort.current?.abort()
+    const controller = new AbortController()
+    abort.current = controller
     try {
-      const loaded = await loadModel(result.file, result.extension)
+      const loaded = await loadModel(result.file, result.extension, { signal: controller.signal })
       if (id !== requestId.current) return
       setModel(loaded)
       setUnit(suggestedUnit(result.extension))
     } catch (e) {
-      if (id !== requestId.current) return
+      if (id !== requestId.current || (e instanceof DOMException && e.name === 'AbortError')) return
       let message = 'Could not read this file.'
       if (e instanceof Error) message = e.message
       setError(message)
@@ -136,6 +141,7 @@ export default function App() {
         fileName={model && model.name}
         onRemove={() => {
           requestId.current += 1
+          abort.current?.abort()
           setLoading(false)
           setModel(null)
           setError(null)
