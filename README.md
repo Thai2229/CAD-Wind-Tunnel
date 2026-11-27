@@ -30,6 +30,10 @@ Other scripts: `npm test` (vitest), `npm run lint` (oxlint), `npm run build`, `n
 
 STEP and IGES import uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1), which is built on [Open CASCADE Technology](https://dev.opencascade.org/) (LGPL-2.1 with the OCCT exception). The library is bundled unmodified as a separate WebAssembly file; the license texts ship in `node_modules/occt-import-js/dist/`.
 
+## License
+
+MIT, see [LICENSE](LICENSE). Third-party components keep their own licenses, listed above.
+
 ## Layout
 
 - `src/lib/`: pure logic with tests (upload validation, flow field, aero math, model loading)
