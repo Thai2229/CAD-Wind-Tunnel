@@ -24,7 +24,7 @@ export function UploadOverlay({ hasModel, loading, error, dragging, onBrowse }: 
       {!loading && !hasModel && (
         <div className={cx('overlay', dragging && 'is-dragging')}>
           <div className="dropzone">
-            <p className="overlay-title">Drop an STL, OBJ, GLB or PLY file</p>
+            <p className="overlay-title">Drop an STL, OBJ, GLB, PLY, STEP or IGES file</p>
             <p className="overlay-sub">Up to 50 MB. Parsed in your browser, never uploaded.</p>
             <button type="button" className="btn btn-primary" onClick={onBrowse}>
               Browse files

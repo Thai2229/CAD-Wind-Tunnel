@@ -2,10 +2,11 @@ import {
   Box3,
   LoadingManager,
   Matrix4,
+  BufferGeometry,
   Float32BufferAttribute,
+  Uint32BufferAttribute,
   Mesh,
   Vector3,
-  type BufferGeometry,
   type Material,
   type Object3D,
   type Texture,
@@ -17,6 +18,7 @@ import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import type { Vec3 } from './flowField'
 import type { LengthUnit } from './aero'
 import { SECTION } from './tunnel'
+import { CadLimitError, occtToMeshData, stepFormatError, type OcctMeshData } from './occtMesh'
 
 const IDENTITY = new Matrix4()
 
@@ -49,6 +51,69 @@ export function assertModelBudget(vertexCounts: number[]): void {
     throw new ModelError('This model is too complex for the browser (limit: 3 million vertices, 500 meshes). Simplify or decimate it and try again.')
   }
 }
+
+// occt-import-js is several MB of wasm: load it only when a STEP/IGES file arrives,
+// and serve the wasm from our own origin.
+async function initOcct() {
+  const [{ default: init }, { default: wasmUrl }] = await Promise.all([
+    import('occt-import-js'),
+    import('occt-import-js/dist/occt-import-js.wasm?url'),
+  ])
+  return init({ locateFile: () => wasmUrl })
+}
+
+// Caches a successful load; a failed one is forgotten so the next drop retries.
+export function retryableOnce<T>(factory: () => Promise<T>): () => Promise<T> {
+  let promise: Promise<T> | null = null
+  return () => {
+    if (!promise) {
+      promise = factory().catch((e: unknown) => {
+        promise = null
+        throw e
+      })
+    }
+    return promise
+  }
+}
+
+const loadOcct = retryableOnce(initOcct)
+
+async function parseCad(file: File, extension: string): Promise<BufferGeometry[]> {
+  let data: OcctMeshData[]
+  let occt: Awaited<ReturnType<typeof initOcct>>
+  try {
+    occt = await loadOcct()
+  } catch (e) {
+    console.error(e)
+    throw new ModelError('Could not load the STEP/IGES reader. Check your connection and try again.')
+  }
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    // shortcut: parses on the main thread; move to a Worker with a watchdog so a heavy STEP file can't freeze the tab, and drop 'unsafe-eval' from the main document CSP
+    if (extension === '.step' || extension === '.stp') {
+      data = occtToMeshData(occt.ReadStepFile(bytes, null))
+    } else {
+      data = occtToMeshData(occt.ReadIgesFile(bytes, null))
+    }
+  } catch (e) {
+    if (e instanceof CadLimitError) throw new ModelError(e.message)
+    console.error(e)
+    let detail = ''
+    if (e instanceof Error) detail = e.message
+    throw new ModelError(stepFormatError(extension, detail))
+  }
+  assertModelBudget(data.map((d) => d.positions.length / 3))
+  return data.map((d) => {
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute(d.positions, 3))
+    if (d.normals) g.setAttribute('normal', new Float32BufferAttribute(d.normals, 3))
+    g.setIndex(new Uint32BufferAttribute(d.indices, 1))
+    g.rotateX(-Math.PI / 2) // CAD STEP/IGES is Z-up, the scene is Y-up
+    return g
+  })
+}
+
+const CAD_EXTENSIONS = ['.step', '.stp', '.iges', '.igs']
 
 const SUGGESTED_UNIT: Record<string, LengthUnit> = { '.glb': 'm' }
 
@@ -113,6 +178,7 @@ function meshesOf(root: Object3D): BufferGeometry[] {
 }
 
 async function parse(file: File, extension: string): Promise<BufferGeometry[]> {
+  if (CAD_EXTENSIONS.includes(extension)) return parseCad(file, extension)
   if (extension === '.obj') {
     return meshesOf(new OBJLoader().parse(await file.text()))
   }

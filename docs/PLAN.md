@@ -25,8 +25,9 @@ Real wind tunnel results need computational fluid dynamics (CFD), which is far t
 7. Tests for the pure logic (upload validation, flow field, pressure, drag math).
 
 ### Phase 2: real CAD formats
-- STEP / IGES support via OpenCASCADE compiled to WebAssembly (`occt-import-js`), loaded on demand since it is several MB.
-- Better frontal area: rasterize the model's silhouette instead of using the bounding box.
+- Done: STEP / IGES support via OpenCASCADE compiled to WebAssembly (`occt-import-js`), loaded on demand since it is several MB.
+- Remaining: B-rep (`.brep`) import if users ask for it.
+- Remaining: better frontal area: rasterize the model's silhouette instead of using the bounding box.
 
 ### Phase 3: better physics
 - Run a real solver server-side (OpenFOAM in a container, or a GPU lattice-Boltzmann solver) as an async job. The browser uploads, polls for the result, and shows the computed flow field.
