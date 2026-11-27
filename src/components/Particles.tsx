@@ -1,7 +1,8 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { applyWake, velocityAt, wakeFactor, type Obstacle, type Vec3 } from '../lib/flowField'
+import { aimedSpawn } from '../lib/aimedSpawn'
 import { SECTION } from '../lib/tunnel'
 import { WAKE_TINT_BASE, wakeTint } from '../lib/wakeTint'
 
@@ -12,6 +13,8 @@ const COUNT = 3000
 const AIMED_SHARE = 0.5
 const UNAIMED: Obstacle = { center: [0, -100, 0], halfExtents: [0, 0, 0] }
 
+const yz: [number, number] = [0, 0]
+
 function spawn(a: Float32Array, i: number, anywhere: boolean, o: Obstacle) {
   let span = 0.03
   if (anywhere) span = 1
@@ -20,8 +23,9 @@ function spawn(a: Float32Array, i: number, anywhere: boolean, o: Obstacle) {
   a[i * 3 + 2] = (Math.random() * 2 - 1) * (W / 2 - 0.1)
   // an absent model sits far below the floor
   if (o.center[1] > 0 && Math.random() < AIMED_SHARE) {
-    a[i * 3 + 1] = Math.max(0.1, o.center[1] + (Math.random() * 2 - 1) * o.halfExtents[1] * 1.6)
-    a[i * 3 + 2] = (Math.random() * 2 - 1) * o.halfExtents[2] * 1.6
+    aimedSpawn(o, { width: W, height: H }, Math.random(), Math.random(), yz)
+    a[i * 3 + 1] = yz[0]
+    a[i * 3 + 2] = yz[1]
   }
 }
 
@@ -54,6 +58,8 @@ export function Particles({ obstacle, speed }: Props) {
     return geometry
   }, [])
   useEffect(() => () => geometry.dispose(), [geometry])
+  // true while particle colours may still carry wake tint
+  const tinted = useRef(false)
 
   useFrame((_, delta) => {
     // visual speed is clamped: 0 stays still, 60 m/s is ~8 units/s
@@ -63,18 +69,32 @@ export function Particles({ obstacle, speed }: Props) {
     const positions = geometry.getAttribute('position').array as Float32Array
     const colors = geometry.getAttribute('color').array as Float32Array
     frame = (frame + 97) % JITTER_SIZE
+    // no model: the obstacle is a far-away sentinel, so skip all wake work (and clear any old tint once)
+    const hasModel = obstacle.center[1] > 0
+    if (!hasModel && tinted.current) {
+      for (let i = 0; i < COUNT; i++) {
+        colors[i * 3] = WAKE_TINT_BASE[0] ** 2
+        colors[i * 3 + 1] = WAKE_TINT_BASE[1] ** 2
+        colors[i * 3 + 2] = WAKE_TINT_BASE[2] ** 2
+      }
+      tinted.current = false
+    }
+    if (hasModel) tinted.current = true
     for (let i = 0; i < COUNT; i++) {
       p[0] = positions[i * 3]!
       p[1] = positions[i * 3 + 1]!
       p[2] = positions[i * 3 + 2]!
       velocityAt(p, obstacle, vis, v)
-      const wake = wakeFactor(p, obstacle)
-      wakeTint(wake, rgb)
-      // vertex colours are linear; squaring is a cheap sRGB to linear approximation
-      colors[i * 3] = rgb[0] * rgb[0]
-      colors[i * 3 + 1] = rgb[1] * rgb[1]
-      colors[i * 3 + 2] = rgb[2] * rgb[2]
-      applyWake(v, wake, v)
+      let wake = 0
+      if (hasModel) {
+        wake = wakeFactor(p, obstacle)
+        wakeTint(wake, rgb)
+        // vertex colours are linear; squaring is a cheap sRGB to linear approximation
+        colors[i * 3] = rgb[0] * rgb[0]
+        colors[i * 3 + 1] = rgb[1] * rgb[1]
+        colors[i * 3 + 2] = rgb[2] * rgb[2]
+        applyWake(v, wake, v)
+      }
       const s = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
       if (wake > 0.01) {
         // turbulent look: random kick scaled by how deep in the wake the particle is
