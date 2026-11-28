@@ -42,3 +42,5 @@ MIT, see [LICENSE](LICENSE). Third-party components keep their own licenses, lis
 - `src/components/`: the three.js scene and the control panel
 - `docs/PLAN.md`: roadmap (real CFD, accounts and S3 storage)
 - `docs/DEPLOYMENT.md`: Vercel setup, branch flow and the S3 plan
+- `docs/ACCOUNTS.md`: sign-in and saved-models design (Neon Postgres, Neon Auth, S3)
+- `db/migrations/`: SQL for the saved-models tables
