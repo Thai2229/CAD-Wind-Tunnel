@@ -37,10 +37,10 @@ Row level security through Neon's Data API is possible later. For now the API ch
 
 Saving a model:
 
-1. The browser asks `POST /api/models` with the file name, size and unit and the JWT.
-2. The function verifies the JWT against Neon's published public keys, checks the extension and the size caps (50 MB, 20 MB for STEP and IGES), inserts a `pending` row and returns a presigned S3 upload URL for `users/<user id>/<model id>/<file name>`.
+1. The browser asks `POST /api/models` with the file name, extension, size and unit and the JWT. It never sends a storage key.
+2. The function verifies the JWT (see the requirements below), validates the body, enforces the quotas, inserts a `pending` row and returns a presigned upload for the key `users/<sub>/<model id><extension>`. The server builds that key. The file name the user typed is stored in `models.name` only and never appears in a key, a path or a header.
 3. The browser uploads straight to S3.
-4. The browser calls `POST /api/models/<id>/complete`. The function checks the object exists with the expected size, then marks the row `ready`.
+4. The browser calls `POST /api/models/<id>/complete` with no body. The function loads the row for this user in the `pending` state, checks the object in S3 against the row (see below), and marks it `ready` in one conditional update.
 
 Pending rows older than a day with no upload are cleaned up by a scheduled job.
 
@@ -56,9 +56,73 @@ Deleting a model removes the S3 object and the row. Deleting an account removes 
 
 ## Open decisions
 
-- Do saved models expire? A lifecycle rule on the bucket is cheap and keeps storage cost bounded. Suggested: keep them until the user deletes them, with a per-user cap on count and total size.
-- Per-user limits: suggested 20 models and 500 MB each at launch.
-- Sharing a model by link is out of scope for the first version.
+- Do saved models expire? A lifecycle rule on the bucket is cheap and keeps storage cost bounded. Suggested: keep them until the user deletes them.
+- Sharing a model by link is out of scope for the first version and needs its own security review.
+
+The per-user limits are not optional. They are the abuse and cost control for S3, so they are enforced, not just displayed: 20 models, 500 MB in total and at most 5 pending uploads per user at launch. The numbers can change, but the limits must exist.
+
+## Requirements to carry into the build
+
+A security review of this design listed what the build must do. The schema already covers the database parts.
+
+### Verifying the sign-in token
+
+- Verify every token in the API with a maintained library such as `jose`. Never decode a token without verifying it.
+- Take the key set address from server configuration only. Ignore `jku`, `x5u` and `jwk` headers inside the token.
+- Pin the signing algorithm to the one Neon publishes, and reject `none` and the HMAC family.
+- Pick the key by `kid`. Cache the key set with an expiry. On an unknown `kid`, refetch at most once in a short window, so random key ids cannot force a fetch on every request.
+- Check `iss` against the exact issuer for this environment's Neon branch, so a staging token fails in production. Check `aud` if Neon sets one. Check `exp`, `nbf` and `iat` with at most 60 seconds of clock skew, and require a non-empty `sub`.
+- Accept the token only in the `Authorization: Bearer` header. Never put it in a URL and never log it.
+- If the key set cannot be fetched, fail closed, or serve from cache for a short bounded time.
+- Return a generic 401 for any failure.
+- Confirm in Neon's docs how logout and revocation work. A token stays valid until `exp`, so keep that short.
+
+### Ownership on every route
+
+- `user_id` always comes from the verified token and the row id from the path, never from the body. Validate the id as a UUID before querying.
+- Apply one shared ownership helper to every route: complete, file download, delete and every runs route. `runs` has no `user_id`, so its queries join `models` and filter on `models.user_id`.
+- Return 404, not 403, for a row that is missing or belongs to someone else.
+- Write a test that user B gets 404 on every one of user A's routes.
+
+### Uploads
+
+- Presigned POST with a policy is preferred: fixed `key`, fixed `Content-Type`, and `content-length-range` set to the declared size. If a presigned PUT is used, sign the exact `Content-Length` and `Content-Type`, because a PUT cannot enforce a size range any other way.
+- Expiry of 60 to 300 seconds, one upload URL per pending row, and never a new one for a row that is already `ready`. Use `If-None-Match: *` on the write so an existing object is never overwritten.
+- At `complete`, trust nothing from the client. Run a HEAD on the server-derived key and compare the length and content type to the row. Fetch the first few hundred bytes and sniff them: `glTF` for GLB, `ply` for PLY, `ISO-10303-21` for STEP. If it fails, mark the row `failed` and delete the object.
+- Update with `where id = $1 and user_id = $2 and status = 'pending'` and treat zero rows as an error. `ready` and `failed` are final.
+- Check the quotas in the same transaction as the insert, serialized per user with `pg_advisory_xact_lock(hashtext(user_id))`. Without that, two parallel requests can both pass the count check. Count pending rows too.
+- Validate the body against a strict schema that rejects unknown fields. Take the extension and unit from the allowlists. Strip control characters, path separators and right-to-left overrides from the name, cap its length, and always escape it when shown.
+
+### Bucket and downloads
+
+- Block all public access, disable ACLs, turn on encryption, and deny requests that are not over TLS.
+- A lifecycle rule that aborts incomplete multipart uploads. A second rule can expire anything left unfinished.
+- The IAM role gets `PutObject`, `GetObject`, `DeleteObject` and `ListBucket` on `users/*` in its own environment's bucket and nothing else. Trust Vercel's OIDC token only for the exact project and environment.
+- CORS allows only the exact site origins, with separate lists for staging and production. No `*`. Previews use their own bucket or none.
+- Download links last 60 seconds and are issued with `response-content-disposition=attachment`. The file is only ever parsed by the browser's model loader, never rendered by a server.
+- Turn on access logging or CloudTrail data events for the bucket.
+
+### Account deletion and cleanup
+
+- Deletion goes in order: delete the objects under `users/<sub>/` (paginated), then the rows, then the auth user. It must be safe to retry, so a crash midway leaves a record that a job finishes. Ask for a recent sign-in first.
+- Because `user_id` has no foreign key, a user removed straight from the Neon console leaves rows behind. A scheduled job reconciles `models.user_id` against `neon_auth."user"`.
+- A cleanup job removes pending rows older than a day together with their objects, handles `failed` rows, and finds objects that have no row. It runs from Vercel Cron, takes a lock so two runs never overlap, and its endpoint requires a secret compared in constant time.
+
+### Page, API and secrets
+
+- The page policy's `connect-src` lists the exact Neon Auth address and the exact bucket host for that environment, not a wildcard. Each environment gets its own policy, so staging never allows a production address.
+- API functions are same-origin. Send no `Access-Control-Allow-Origin: *`. Authentication uses the bearer header, not cookies, so cross-site request forgery does not apply. If cookies are ever added, add protection first.
+- Add per-user and per-IP rate limits on creating uploads, completing them and downloading, backed by a shared store since serverless memory is not shared. Return 429, and cap request body size.
+- Send `Cache-Control: no-store` on authenticated responses, especially those carrying presigned URLs.
+- Log the opaque user id, route, status and a request id. Never log tokens, presigned URLs, emails or file names. Return generic database errors to clients. Say in the README what personal data exists (the email and name that Google gives Neon Auth, plus file names) and how long logs are kept.
+- Scope Vercel variables per environment. The production database URL and AWS role are available to Production only, marked sensitive, and never to Preview. Nothing secret gets a `VITE_` prefix. Use a dedicated database role for the API with table-level grants, not the owner role.
+- Run `npm audit` and a secret scanner such as gitleaks in CI, and pin the versions of `jose`, the AWS SDK and the Neon packages once chosen.
+
+### Google sign-in
+
+- Production must use our own Google OAuth client. Shared credentials are for development only, so using them in production is a release blocker, not a todo.
+- Register one exact redirect URI per Neon branch, with no wildcards and no preview URLs. Ask only for the `openid email profile` scopes.
+- Confirm in Neon's docs that state and PKCE are on, and let the library handle them. Set the trusted origins in the Auth settings to the exact site origins. If email and password sign-in is not wanted, turn it off.
 
 ## What is needed from you
 
