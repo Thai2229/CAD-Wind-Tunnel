@@ -35,10 +35,10 @@ Real wind tunnel results need computational fluid dynamics (CFD), which is far t
 - Alternatively, a WebGPU lattice-Boltzmann solver in the browser for coarse but genuine CFD.
 
 ### Phase 4: accounts and storage
-- User accounts (auth provider such as Cognito, Auth0 or Clerk).
-- Postgres for users, models and run metadata.
+- Sign-in with Neon Auth, including Google. Neon Postgres holds users and our tables.
 - Amazon S3 for the model files and solver results, uploaded with presigned URLs so files never pass through our API.
 - A "my models" page to reopen past runs.
+- The design and the first database migration are in [ACCOUNTS.md](ACCOUNTS.md). The tunnel keeps working without an account.
 
 ## Open questions
 - Which CAD formats do users actually have? If most are STEP files from SolidWorks or Fusion, Phase 2 should come early.
